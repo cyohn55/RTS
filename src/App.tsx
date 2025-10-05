@@ -12,6 +12,7 @@ import { useGameStore } from './game/state';
 import { MainMenu } from './components/screens/MainMenu';
 import { AnimalSelectionLobby } from './components/screens/AnimalSelectionLobby';
 import { PostGameScreen } from './components/screens/PostGameScreen';
+import { BackgroundMusic } from './components/BackgroundMusic';
 
 export default function App() {
   const initialize = useGameStore((s) => s.initializeGame);
@@ -23,16 +24,27 @@ export default function App() {
 
   // Render different screens based on state
   if (currentScreen === 'menu') {
-    return <MainMenu />;
+    return (
+      <>
+        <BackgroundMusic />
+        <MainMenu />
+      </>
+    );
   }
 
   if (currentScreen === 'lobby') {
-    return <AnimalSelectionLobby />;
+    return (
+      <>
+        <BackgroundMusic />
+        <AnimalSelectionLobby />
+      </>
+    );
   }
 
   // Playing screen (original game view)
   return (
     <>
+      <BackgroundMusic />
       <PostGameScreen />
       <KeyboardShortcuts />
       <div className="hud">

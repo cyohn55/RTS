@@ -36,6 +36,10 @@ export interface Unit {
   // Hopping animation (for Frog and Bunny)
   hopPhase?: number; // 0 to 1, represents position in hop cycle
   isHopping?: boolean; // true when unit is moving (for Frog and Bunny)
+  // Flying animation (for Owl)
+  wingPhase?: number; // 0 to 1, represents wing flap cycle
+  isFlying?: boolean; // true when unit is moving (for Owl)
+  nearDestinationSinceMs?: number; // timestamp when owl first got within 10 units of destination
   lastCombatTargetId?: string; // ID of last target engaged in combat for persistence
   lastCombatEngagementMs?: number; // timestamp of last combat engagement
   unitState?: 'idle' | 'moving_to_order' | 'pursuing_enemy'; // current unit behavior state
@@ -90,6 +94,11 @@ export interface CommandSetPatrol {
   queenId: string;
   startPosition: Position3D;
   endPosition: Position3D;
+}
+
+export interface CommandAttackTarget {
+  unitIds: string[];
+  targetId: string; // Enemy unit ID to attack
 }
 
 

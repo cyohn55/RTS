@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { nanoid } from 'nanoid';
 import { produce } from 'immer';
 import { SpatialGrid } from '../utils/SpatialGrid';
-import type { Position3D, AnimalId, CommandMoveUnits, CommandSetPatrol, GameConfig, GameState, Player, Unit, PatrolRoute } from './types';
+import type { Position3D, AnimalId, CommandMoveUnits, CommandSetPatrol, CommandAttackTarget, GameConfig, GameState, Player, Unit, PatrolRoute } from './types';
 
 type BridgeAnimationState = 'up' | 'lowering' | 'down' | 'raising';
 type BridgeFrame = 'Fully_Up' | 'Almost_Up' | 'Almost_Down' | 'Fully_Down';
@@ -56,6 +56,7 @@ type Store = GameState & {
   tick: (dtSec: number, nowMs: number) => void;
   moveCommand: (cmd: CommandMoveUnits) => void;
   setPatrol: (cmd: CommandSetPatrol) => void;
+  attackTarget: (cmd: CommandAttackTarget) => void;
   selectUnits: (unitIds: string[]) => void;
   addToSelection: (unitIds: string[]) => void;
   clearSelection: () => void;
@@ -144,9 +145,9 @@ export const useGameStore = create<Store>((set, get) => ({
   isPaused: false,
   lightingSettings: {
     sunBrightness: 5.0,
-    moonBrightness: 9.6,
+    moonBrightness: 5.0,
     ambientLight: 1.6,
-    dayNightSpeed: 120,
+    dayNightSpeed: 60,
   },
   updateLightingSettings: (settings) => set((state) => ({
     lightingSettings: { ...state.lightingSettings, ...settings }
@@ -479,6 +480,21 @@ export const useGameStore = create<Store>((set, get) => ({
               }
             }
 
+            // Owl landing logic - land if within 15 units for more than 5 seconds
+            if (unit.animal === 'Owl' && unit.isFlying && distanceToOrder <= 15) {
+              if (!unit.nearDestinationSinceMs) {
+                unit.nearDestinationSinceMs = nowMs;
+              } else if (nowMs - unit.nearDestinationSinceMs >= 5000) {
+                // Been near destination for 5+ seconds, land
+                unit.isFlying = false;
+                delete unit.nearDestinationSinceMs;
+                console.log(`Owl ${unit.id} landing after hovering near destination`);
+              }
+            } else if (unit.animal === 'Owl' && distanceToOrder > 15) {
+              // Reset timer if moved away from destination
+              delete unit.nearDestinationSinceMs;
+            }
+
             // Move toward ordered position (but allow combat interruption)
             if (distanceToOrder > 0.5 && !isMovementPaused) {
               const direction = normalize3D(subtract3D(order, unit.position));
@@ -497,6 +513,16 @@ export const useGameStore = create<Store>((set, get) => ({
                 unit.hopPhase = ((unit.hopPhase || 0) + (hopSpeed * dtSec)) % 1;
               } else {
                 unit.isHopping = false;
+              }
+
+              // Owl flying animation
+              if (unit.animal === 'Owl') {
+                unit.isFlying = true;
+                // Update wing phase (cycles 0-1 for wing flapping)
+                const flapSpeed = 3; // Flaps per second
+                unit.wingPhase = ((unit.wingPhase || 0) + (flapSpeed * dtSec)) % 1;
+              } else if (unit.animal !== 'Owl') {
+                unit.isFlying = false;
               }
 
               const newPosition = {
@@ -524,6 +550,10 @@ export const useGameStore = create<Store>((set, get) => ({
               delete draft.unitOrders[unit.id];
               delete unit.arrivedAtDestinationMs;
               unit.unitState = 'idle';
+              // Owl landed when destination reached
+              if (unit.animal === 'Owl') {
+                unit.isFlying = false;
+              }
               console.log(`PLAYER unit ${unit.animal} reached destination - entering IDLE state`);
             }
           }
@@ -650,11 +680,34 @@ export const useGameStore = create<Store>((set, get) => ({
           const isInRecentCombat = unit.lastCombatEngagementMs && nowMs - unit.lastCombatEngagementMs < 2000;
           const isMovementPaused = unit.movementPausedUntilMs && nowMs < unit.movementPausedUntilMs && !isInRecentCombat;
 
+          // Owl landing logic - land if within 15 units for more than 5 seconds
+          if (unit.animal === 'Owl' && unit.isFlying && distanceToOrder <= 15) {
+            if (!unit.nearDestinationSinceMs) {
+              unit.nearDestinationSinceMs = nowMs;
+            } else if (nowMs - unit.nearDestinationSinceMs >= 5000) {
+              // Been near destination for 5+ seconds, land
+              unit.isFlying = false;
+              delete unit.nearDestinationSinceMs;
+            }
+          } else if (unit.animal === 'Owl' && distanceToOrder > 15) {
+            // Reset timer if moved away from destination
+            delete unit.nearDestinationSinceMs;
+          }
+
           // Move toward ordered position
           if (distanceToOrder > 0.5 && !isMovementPaused) {
             const direction = normalize3D(subtract3D(order, unit.position));
             const moveDistance = unit.moveSpeed * dtSec;
             unit.rotation = Math.atan2(direction.x, direction.z);
+
+            // Owl flying animation (AI units with orders)
+            if (unit.animal === 'Owl') {
+              unit.isFlying = true;
+              const flapSpeed = 3; // Flaps per second
+              unit.wingPhase = ((unit.wingPhase || 0) + (flapSpeed * dtSec)) % 1;
+            } else if (unit.animal !== 'Owl') {
+              unit.isFlying = false;
+            }
 
             const newPosition = {
               x: unit.position.x + direction.x * moveDistance,
@@ -663,6 +716,9 @@ export const useGameStore = create<Store>((set, get) => ({
             };
 
             unit.position = checkCollision(newPosition, unit, draft.units, 2.5, draft.selectedUnitIds, draft.localPlayerId, draft.unitOrders);
+          } else if (unit.animal === 'Owl') {
+            // Owl landed when destination reached
+            unit.isFlying = false;
           }
 
           // Clear order when destination reached
@@ -675,6 +731,20 @@ export const useGameStore = create<Store>((set, get) => ({
           const targetPos = patrol.currentTarget === 'end' ? patrol.endPosition : patrol.startPosition;
           const dist = distance3D(unit.position, targetPos);
 
+          // Owl landing logic - land if within 15 units for more than 5 seconds
+          if (unit.animal === 'Owl' && unit.isFlying && dist <= 15) {
+            if (!unit.nearDestinationSinceMs) {
+              unit.nearDestinationSinceMs = nowMs;
+            } else if (nowMs - unit.nearDestinationSinceMs >= 5000) {
+              // Been near destination for 5+ seconds, land
+              unit.isFlying = false;
+              delete unit.nearDestinationSinceMs;
+            }
+          } else if (unit.animal === 'Owl' && dist > 15) {
+            // Reset timer if moved away from destination
+            delete unit.nearDestinationSinceMs;
+          }
+
           if (dist > 1) {
             // Move toward patrol target
             const direction = normalize3D(subtract3D(targetPos, unit.position));
@@ -682,6 +752,13 @@ export const useGameStore = create<Store>((set, get) => ({
 
             // Update rotation to face movement direction
             unit.rotation = Math.atan2(direction.x, direction.z);
+
+            // Owl flying animation (Queen patrol)
+            if (unit.animal === 'Owl') {
+              unit.isFlying = true;
+              const flapSpeed = 3; // Flaps per second
+              unit.wingPhase = ((unit.wingPhase || 0) + (flapSpeed * dtSec)) % 1;
+            }
 
             const newPosition = {
               x: unit.position.x + direction.x * moveDistance,
@@ -694,6 +771,10 @@ export const useGameStore = create<Store>((set, get) => ({
           } else {
             // Reached patrol point, switch to other end
             draft.queenPatrols[unit.id].currentTarget = patrol.currentTarget === 'end' ? 'start' : 'end';
+            // Owl landed when patrol point reached
+            if (unit.animal === 'Owl') {
+              unit.isFlying = false;
+            }
           }
         }
 
@@ -869,6 +950,13 @@ export const useGameStore = create<Store>((set, get) => ({
               }
               console.log(`Combat queued: ${unit.animal} vs ${target.animal}, distance: ${Math.sqrt(distSquared).toFixed(1)}`);
             }
+
+            // Owl should keep flying even while attacking
+            if (unit.animal === 'Owl') {
+              unit.isFlying = true;
+              const flapSpeed = 3; // Flaps per second
+              unit.wingPhase = ((unit.wingPhase || 0) + (flapSpeed * dtSec)) % 1;
+            }
           }
 
           // Move toward target if not in melee range
@@ -893,7 +981,22 @@ export const useGameStore = create<Store>((set, get) => ({
             } else {
               unit.isHopping = false;
             }
+
+            // Owl flying animation (AI units)
+            if (unit.animal === 'Owl') {
+              unit.isFlying = true;
+              const flapSpeed = 3; // Flaps per second
+              unit.wingPhase = ((unit.wingPhase || 0) + (flapSpeed * dtSec)) % 1;
+            } else if (unit.animal !== 'Owl') {
+              unit.isFlying = false;
+            }
           }
+        }
+
+        // ALWAYS update owl wing animation if they're flying (even when idle/hovering)
+        if (unit.animal === 'Owl' && unit.isFlying) {
+          const flapSpeed = 3; // Flaps per second
+          unit.wingPhase = ((unit.wingPhase || 0) + (flapSpeed * dtSec)) % 1;
         }
       }
 
@@ -920,12 +1023,12 @@ export const useGameStore = create<Store>((set, get) => ({
           draft.deadUnitsToRemove.push(target.id);
         }
 
-        // Apply knockback effect
+        // Apply knockback effect (but not to Bases - they should stay stationary)
         const knockbackDistance = 0.8; // Small knockback distance
         const direction = normalize3D(subtract3D(target.position, attacker.position));
 
-        // Only apply knockback if target is still alive and direction is valid
-        if (target.hp > 0 && (direction.x !== 0 || direction.z !== 0)) {
+        // Only apply knockback if target is still alive, not a Base, and direction is valid
+        if (target.hp > 0 && target.kind !== 'Base' && (direction.x !== 0 || direction.z !== 0)) {
           const newPosition = {
             x: target.position.x + direction.x * knockbackDistance,
             y: target.position.y,
@@ -1046,6 +1149,9 @@ export const useGameStore = create<Store>((set, get) => ({
         delete u.movementPausedUntilMs;
         delete u.firstBlockedAtMs;
 
+        // Clear owl landing timer
+        delete u.nearDestinationSinceMs;
+
         console.log(`PLAYER issued new order to ${u.animal} - switching to MOVING_TO_ORDER state`);
       }
     })
@@ -1066,6 +1172,35 @@ export const useGameStore = create<Store>((set, get) => ({
       // Clear any existing unit orders for this queen
       delete draft.unitOrders[cmd.queenId];
 
+    })
+  ),
+
+  attackTarget: (cmd) => set((prev) =>
+    produce(prev, (draft) => {
+      const target = draft.units.find(u => u.id === cmd.targetId);
+      if (!target) return;
+
+      for (const id of cmd.unitIds) {
+        const unit = draft.units.find(u => u.id === id);
+        if (!unit || unit.ownerId !== draft.localPlayerId) continue;
+
+        // Set movement target to enemy position
+        draft.unitOrders[id] = { x: target.position.x, y: 0, z: target.position.z };
+
+        // Reset unit state to prioritize attack order
+        unit.unitState = 'pursuing_enemy';
+        delete unit.arrivedAtDestinationMs;
+
+        // Clear blocking state
+        unit.collisionAttempts = 0;
+        delete unit.movementPausedUntilMs;
+        delete unit.firstBlockedAtMs;
+
+        // Clear owl landing timer
+        delete unit.nearDestinationSinceMs;
+
+        console.log(`Unit ${unit.animal} targeting enemy ${cmd.targetId}`);
+      }
     })
   ),
 
@@ -1232,7 +1367,10 @@ function checkCollision(newPosition: Position3D, currentUnit: Unit, allUnits: Un
     }
 
     // UNIT SPACING FIX: Enforce 2.5 unit minimum distance for all units
-    const minimumDistance = 2.5;
+    // Increase spacing for Yetti units by 1 unit
+    const baseMinimumDistance = 2.5;
+    const yetiSpacingBonus = (currentUnit.animal === 'Yetti' || other.animal === 'Yetti') ? 1.0 : 0;
+    const minimumDistance = baseMinimumDistance + yetiSpacingBonus;
     const minimumDistanceSquared = minimumDistance * minimumDistance;
 
     if (distanceSquared < minimumDistanceSquared) {

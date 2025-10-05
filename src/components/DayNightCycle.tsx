@@ -25,6 +25,7 @@ export function DayNightCycle({ cycleDurationSeconds = 120 }: DayNightCycleProps
   const moonGlow4Ref = useRef<THREE.Mesh>(null);
   const sunLightRef = useRef<THREE.PointLight>(null);
   const moonLightRef = useRef<THREE.PointLight>(null);
+  const horizonLightRef = useRef<THREE.PointLight>(null);
 
   const { scene } = useThree();
 
@@ -57,6 +58,10 @@ export function DayNightCycle({ cycleDurationSeconds = 120 }: DayNightCycleProps
     if (sunRef.current && sunMeshRef.current) {
       sunRef.current.position.set(sunX, sunY, sunZ);
       sunMeshRef.current.position.set(sunX, sunY, sunZ);
+
+      // Point sun light at battle map center for realistic shadows
+      sunRef.current.target.position.set(0, 0, 0);
+      sunRef.current.target.updateMatrixWorld();
 
       // Sun is brightest when above horizon (higher Y = brighter)
       // Add minimum intensity so sun always provides some light
@@ -91,9 +96,13 @@ export function DayNightCycle({ cycleDurationSeconds = 120 }: DayNightCycleProps
       moonRef.current.position.set(moonX, moonY, moonZ);
       moonMeshRef.current.position.set(moonX, moonY, moonZ);
 
+      // Point moon light at battle map center for realistic shadows
+      moonRef.current.target.position.set(0, 0, 0);
+      moonRef.current.target.updateMatrixWorld();
+
       // Moon is brightest when above horizon (higher Y = brighter)
       // Add minimum intensity so moon always provides some light
-      const moonIntensity = Math.max(0.8, ((moonY - 20) / radiusY)) * lightingSettings.moonBrightness; // Minimum 0.8 to keep scene lit
+      const moonIntensity = Math.max(2.0, ((moonY - 20) / radiusY)) * lightingSettings.moonBrightness; // Minimum 2.0 for brighter nighttime
       moonRef.current.intensity = moonIntensity;
 
       // Moon glow effect - always fully visible
@@ -117,6 +126,37 @@ export function DayNightCycle({ cycleDurationSeconds = 120 }: DayNightCycleProps
       if (moonLightRef.current) {
         moonLightRef.current.position.set(moonX, moonY, moonZ);
       }
+    }
+
+    // Update horizon light - increases intensity as sun/moon approach horizon
+    if (horizonLightRef.current) {
+      // Calculate how close the sun/moon is to the horizon
+      // sunY and moonY range from (20 - radiusY) to (20 + radiusY)
+      // Horizon is at Y = 20
+      const horizonY = 20;
+      const fortyDegreesDistance = radiusY * 0.67; // Approximate 40 degrees
+
+      // Distance from horizon for both sun and moon
+      const sunDistanceFromHorizon = Math.abs(sunY - horizonY);
+      const moonDistanceFromHorizon = Math.abs(moonY - horizonY);
+
+      // Calculate intensity based on proximity to horizon (0 when far, max when at horizon)
+      let sunHorizonFactor = 0;
+      if (sunDistanceFromHorizon < fortyDegreesDistance) {
+        // Intensity increases as we get closer to horizon (inverse relationship)
+        sunHorizonFactor = 1 - (sunDistanceFromHorizon / fortyDegreesDistance);
+      }
+
+      let moonHorizonFactor = 0;
+      if (moonDistanceFromHorizon < fortyDegreesDistance) {
+        moonHorizonFactor = 1 - (moonDistanceFromHorizon / fortyDegreesDistance);
+      }
+
+      // Use whichever is closer to horizon (sun or moon)
+      const horizonFactor = Math.max(sunHorizonFactor, moonHorizonFactor);
+
+      // Set intensity (0 when far from horizon, up to 8.0 at horizon)
+      horizonLightRef.current.intensity = horizonFactor * 8.0;
     }
 
     // Update hemisphere light for ambient lighting transition
@@ -172,11 +212,11 @@ export function DayNightCycle({ cycleDurationSeconds = 120 }: DayNightCycleProps
 
   return (
     <>
-      {/* Hemisphere light for ambient day/night transition */}
-      <hemisphereLight
+      {/* Hemisphere light for ambient day/night transition - HIDDEN */}
+      {/* <hemisphereLight
         ref={hemisphereRef}
         args={[0x87CEEB, 0x222233, 0.8]}
-      />
+      /> */}
 
       {/* Sun directional light */}
       <directionalLight
@@ -296,12 +336,15 @@ export function DayNightCycle({ cycleDurationSeconds = 120 }: DayNightCycleProps
       {/* Moon point light - emits baby blue light like a lightbulb */}
       <pointLight ref={moonLightRef} position={[-250, 100, 0]} intensity={20} color={0x89CFF0} distance={300} decay={1} />
 
-      {/* Ambient point light at center for minimal base lighting */}
-      <pointLight position={[0, 0, 20]} intensity={2.5} color={0xffffee} distance={150} />
+      {/* Horizon light - increases intensity as sun/moon near horizon */}
+      <pointLight ref={horizonLightRef} position={[0, 20, 0]} intensity={0} color={0xffd9b3} distance={250} decay={1} />
 
-      {/* Additional fill lights to prevent complete darkness */}
-      <pointLight position={[50, 0, 40]} intensity={1.5} color={0xffffff} distance={200} />
-      <pointLight position={[-50, 0, 40]} intensity={1.5} color={0xffffff} distance={200} />
+      {/* Ambient point light at center for minimal base lighting - HIDDEN */}
+      {/* <pointLight position={[0, 0, 20]} intensity={5.0} color={0xffffee} distance={150} /> */}
+
+      {/* Additional fill lights to prevent complete darkness - HIDDEN */}
+      {/* <pointLight position={[50, 0, 40]} intensity={3.0} color={0xffffff} distance={200} />
+      <pointLight position={[-50, 0, 40]} intensity={3.0} color={0xffffff} distance={200} /> */}
     </>
   );
 }

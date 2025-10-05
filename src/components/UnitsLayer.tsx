@@ -2,7 +2,7 @@ import { Suspense, useMemo, useEffect } from 'react';
 import { useThree } from '@react-three/fiber';
 import { useGameStore } from '../game/state';
 import type { AnimalId, Unit } from '../game/types';
-import { usePreloadedModel, createPreparedScene } from '../utils/ModelPreloader';
+import { usePreloadedModel, createPreparedScene, useOwlWingModel } from '../utils/ModelPreloader';
 import { vector3Pool, matrix4Pool, frustumPool } from '../utils/ObjectPool';
 import * as THREE from 'three';
 
@@ -31,6 +31,10 @@ const SELECTION_RING_INNER_MAT = new THREE.MeshStandardMaterial({
 
 const OWNER_RING_MAT = new THREE.MeshBasicMaterial({
   color: "#4169E1",
+});
+
+const AI_OWNER_RING_MAT = new THREE.MeshBasicMaterial({
+  color: "#DC143C", // Crimson red for AI units
 });
 
 // Optimized frustum culling using object pooling
@@ -74,15 +78,39 @@ function UnitModel({ unit }: { unit: Unit }) {
   const gltf = usePreloadedModel(unit.animal);
   const { x, y, z } = unit.position;
 
+  // Always load owl wing model for Owl units (React hooks can't be conditional)
+  // We'll decide whether to use it based on isFlying state
+  const owlWingGltf = unit.animal === 'Owl'
+    ? useOwlWingModel(unit.wingPhase || 0)
+    : null;
+
+  // Debug owl animation
+  if (unit.animal === 'Owl' && Math.random() < 0.01) {
+    console.log(`Owl unit: isFlying=${unit.isFlying}, wingPhase=${unit.wingPhase?.toFixed(2)}, hasWingModel=${!!owlWingGltf}`);
+  }
+
   // Calculate hop offset for Frog and Bunny units
   const yOffset = (unit.animal === 'Frog' || unit.animal === 'Bunny') && unit.isHopping
     ? Math.sin((unit.hopPhase || 0) * Math.PI) * 1.5
     : 0;
 
+  // Calculate flying offset for Owl units (10 units up when flying - reduced from 20)
+  const flyingOffset = (unit.animal === 'Owl' && unit.isFlying) ? 10 : 0;
+
+  // Lower Yeti model by 0.9 units
+  const yetiOffset = unit.animal === 'Yetti' ? -0.9 : 0;
+
+  // Debug logging for Yeti positioning
+  if (unit.animal === 'Yetti' && Math.random() < 0.01) {
+    console.log('Yetti unit position:', { x, y, yOffset, yetiOffset, finalY: y + yOffset + yetiOffset });
+  }
+
   const selectedUnitIds = useGameStore((s) => s.selectedUnitIds);
+  const units = useGameStore((s) => s.units);
   const localPlayerId = useGameStore((s) => s.localPlayerId);
   const selectUnits = useGameStore((s) => s.selectUnits);
   const addToSelection = useGameStore((s) => s.addToSelection);
+  const attackTarget = useGameStore((s) => s.attackTarget);
   const { camera } = useThree();
 
   // Distance-based shadow optimization
@@ -102,12 +130,43 @@ function UnitModel({ unit }: { unit: Unit }) {
     return <BaseMarker x={x} y={y} z={z} />;
   }
 
-  const preparedScene = useMemo(() => {
-    return createPreparedScene(gltf, unit.animal, unit.kind);
-  }, [gltf, unit.animal, unit.kind]);
+  // Use owl wing model if flying, otherwise use base model
+  const activeGltf = (unit.animal === 'Owl' && unit.isFlying && owlWingGltf) ? owlWingGltf : gltf;
 
-  const handleClick = (e: any) => {
+  // Determine which wing frame for cache key
+  const wingFrame = unit.animal === 'Owl' && unit.isFlying
+    ? `wing${Math.floor((unit.wingPhase || 0) * 4) % 4}`
+    : undefined;
+
+  // Debug which model is being used
+  if (unit.animal === 'Owl' && Math.random() < 0.01) {
+    console.log(`Owl model selection: isFlying=${unit.isFlying}, wingPhase=${unit.wingPhase?.toFixed(2)}, wingFrame=${wingFrame}, usingWingModel=${activeGltf === owlWingGltf}`);
+  }
+
+  const preparedScene = useMemo(() => {
+    return createPreparedScene(activeGltf, unit.animal, unit.kind, wingFrame);
+  }, [activeGltf, unit.animal, unit.kind, wingFrame]);
+
+  const handlePointerDown = (e: any) => {
     e.stopPropagation();
+
+    // Right-click on enemy unit - attack target with selected units
+    if (e.button === 2 && !isOwnUnit) {
+      console.log('Right-clicked enemy unit:', unit.id);
+      const selectedUnits = units.filter(u => selectedUnitIds.includes(u.id) && u.ownerId === localPlayerId);
+
+      console.log('Selected units:', selectedUnits.length);
+
+      if (selectedUnits.length > 0) {
+        attackTarget({
+          unitIds: selectedUnits.map(u => u.id),
+          targetId: unit.id
+        });
+      }
+      return;
+    }
+
+    // Left-click on own unit - select it
     if (!isOwnUnit) return;
 
     if (e.shiftKey) {
@@ -123,8 +182,8 @@ function UnitModel({ unit }: { unit: Unit }) {
     // Double the size for Yetti fallback sphere
     const sphereRadius = unit.animal === 'Yetti' ? 1.2 : 0.6;
     return (
-      <group position={[x, y + yOffset, z]} rotation={[0, unit.rotation, 0]}>
-        <mesh position={[0, 0.6, 0]} castShadow onClick={handleClick}>
+      <group position={[x, y + yOffset + flyingOffset, z]} rotation={[0, unit.rotation, 0]}>
+        <mesh position={[0, 0.6, 0]} castShadow onPointerDown={handlePointerDown}>
           <sphereGeometry args={[sphereRadius, 16, 16]} />
           <meshStandardMaterial color={color} />
         </mesh>
@@ -139,17 +198,26 @@ function UnitModel({ unit }: { unit: Unit }) {
   }
 
   return (
-    <group position={[x, y + yOffset, z]} rotation={[0, unit.rotation, 0]} castShadow={shouldCastShadows} receiveShadow={shouldReceiveShadows} onClick={handleClick}>
-      <primitive object={preparedScene} />
+    <group position={[x, y + yOffset + flyingOffset, z]} rotation={[0, unit.rotation, 0]} castShadow={shouldCastShadows} receiveShadow={shouldReceiveShadows} onPointerDown={handlePointerDown}>
+      {/* 3D Model with Yetti-specific vertical offset */}
+      <group position={[0, yetiOffset, 0]}>
+        <primitive object={preparedScene} />
+      </group>
+
+      {/* Selection rings on the ground (offset down when flying) */}
       {isSelected && (
         <>
-          <mesh position={[0, 0.04, 0]} rotation={[-Math.PI / 2, 0, 0]} geometry={SELECTION_RING_OUTER_GEO} material={SELECTION_RING_OUTER_MAT} />
-          <mesh position={[0, 0.25, 0]} rotation={[-Math.PI / 2, 0, 0]} geometry={SELECTION_RING_INNER_GEO} material={SELECTION_RING_INNER_MAT} />
+          <mesh position={[0, 0.04 - flyingOffset, 0]} rotation={[-Math.PI / 2, 0, 0]} geometry={SELECTION_RING_OUTER_GEO} material={SELECTION_RING_OUTER_MAT} />
+          <mesh position={[0, 0.25 - flyingOffset, 0]} rotation={[-Math.PI / 2, 0, 0]} geometry={SELECTION_RING_INNER_GEO} material={SELECTION_RING_INNER_MAT} />
         </>
       )}
-      {isOwnUnit && (
-        <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]} geometry={OWNER_RING_GEO} material={OWNER_RING_MAT} />
-      )}
+      {/* Owner ring - blue for player units, red for AI units */}
+      <mesh
+        position={[0, 0.02 - flyingOffset, 0]}
+        rotation={[-Math.PI / 2, 0, 0]}
+        geometry={OWNER_RING_GEO}
+        material={isOwnUnit ? OWNER_RING_MAT : AI_OWNER_RING_MAT}
+      />
     </group>
   );
 }

@@ -7,8 +7,8 @@ export function MainMenu() {
   return (
     <div className="main-menu">
       <div className="main-menu-content">
-        <h1 className="game-title">RTS BATTLE</h1>
-        <p className="game-subtitle">Command Your Animal Army</p>
+        <h1 className="game-title">Tails We Herd</h1>
+        <p className="game-subtitle">In A Dog Eat Dog World... Bring Bears</p>
 
         <div className="menu-buttons">
           <button
