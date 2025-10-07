@@ -51,7 +51,7 @@ export default function App() {
         <HUD />
       </div>
       <Canvas
-        camera={{ fov: 45 }}
+        camera={{ fov: 45, far: 200000 }}
         shadows
         onContextMenu={(e) => e.preventDefault()}
         gl={{

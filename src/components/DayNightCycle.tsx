@@ -182,13 +182,8 @@ export function DayNightCycle({ cycleDurationSeconds = 120 }: DayNightCycleProps
       hemisphereRef.current.groundColor = groundColor;
       hemisphereRef.current.intensity = lightingSettings.ambientLight + (dayFactor * (lightingSettings.ambientLight * 0.75)); // Dynamic based on ambient setting
 
-      // Update scene background color to match sky
-      const backgroundColor = new THREE.Color().lerpColors(
-        new THREE.Color(0x0a0a15), // Night background (very dark)
-        new THREE.Color(0x5a7fb8), // Day background (lighter blue)
-        dayFactor
-      );
-      scene.background = backgroundColor;
+      // Set background to null to allow skybox to show through
+      scene.background = null;
     }
   });
 
