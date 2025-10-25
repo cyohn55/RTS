@@ -9,9 +9,6 @@ export function HUD() {
   const matchStarted = useGameStore((s) => s.matchStarted);
   const selectedUnitIds = useGameStore((s) => s.selectedUnitIds);
   const units = useGameStore((s) => s.units);
-  const localPlayerId = useGameStore((s) => s.localPlayerId);
-  const players = useGameStore((s) => s.players);
-  const selectedAnimalPool = useGameStore((s) => s.selectedAnimalPool);
 
   // FPS monitoring state
   const [fps, setFps] = useState({ current: 0, average: 0, min: 0, max: 0 });
@@ -33,13 +30,6 @@ export function HUD() {
   }, []);
 
   const selectedUnits = units.filter(u => selectedUnitIds.includes(u.id));
-
-  // Count units by animal type for player
-  const playerUnits = units.filter(u => u.ownerId === localPlayerId && u.kind === 'Unit');
-  const unitCounts: Record<string, number> = {};
-  selectedAnimalPool.forEach(animal => {
-    unitCounts[animal] = playerUnits.filter(u => u.animal === animal).length;
-  });
 
   return (
     <>
@@ -96,31 +86,6 @@ export function HUD() {
       pointerEvents: 'none',
       zIndex: 1000
     }}>
-      {/* Unit counter */}
-      <div style={{
-        background: 'rgba(17,23,38,0.85)',
-        border: '1px solid rgba(88,120,255,0.4)',
-        borderRadius: '8px',
-        padding: '12px 16px',
-        display: 'flex',
-        gap: '16px',
-        backdropFilter: 'blur(10px)'
-      }}>
-        {selectedAnimalPool.map(animal => (
-          <div key={animal} style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            color: '#fff',
-            fontSize: '14px',
-            fontWeight: '600'
-          }}>
-            <span>{animal}:</span>
-            <span style={{ color: '#4ade80' }}>{unitCounts[animal] || 0}</span>
-          </div>
-        ))}
-      </div>
-
       {/* FPS Counter */}
       <div style={{
         background: 'rgba(17,23,38,0.85)',
